@@ -78,21 +78,21 @@ contract MiniAppsPartyFans is Ownable {
 
     /* Initialize (emit) events. */
     event FanClubCreated(
-        uint indexed appid
+        bytes32 indexed clubid
         // FanClub club
     );
     event Payout(
-        uint indexed appid,
+        bytes32 indexed clubid,
         uint amount
     );
     event Shoutout(
-        uint indexed appid,
-        address fan,
+        bytes32 indexed clubid,
+        Fan fan,
         uint love,
         string msg
     );
     event Withdraw(
-        uint indexed appid,
+        bytes32 indexed clubid,
         Fan fan,
         uint amount
     );
@@ -154,8 +154,8 @@ contract MiniAppsPartyFans is Ownable {
      * NOTE: This function can ONLY be executed by party hosts.
      */
     function manage(
-        uint _appid
-    ) external onlyAuthByPartyHosts returns (bool) {
+        // bytes32 _clubid
+    ) external view onlyAuthByPartyHosts returns (bool) {
         // TBD
 
         return true;
@@ -169,31 +169,32 @@ contract MiniAppsPartyFans is Ownable {
      * NOTE: USDC amounts are stored in the Mini Apps Party (eternal) database.
      */
     function payouts(
-        uint _appid,
+        bytes32 _clubid,
         uint8 _maxFans
     ) external onlyAuthByPartyHosts returns (bool) {
-        /* Initialize fan club. */
-        FanClub storage club;// = _clubs[_appid];
-
-// TODO Re-build properties w/ getters.
+        /* Set (fan club) owner. */
+        address owner = getOwner(_clubid);
 
         /* Validate fan club owner. */
-        if (club.owner == address(0x0)) {
+        if (owner == address(0x0)) {
             /* Delegate call to predecessor. */
-            return MiniAppsPartyFans(_predecessor).payouts(_appid);
+            return MiniAppsPartyFans(_predecessor).payouts(_clubid, _maxFans);
         }
 
 uint payoutAmt = 0;
-address receiver = 0x0;
+address receiver = address(0x0);
+
+        /* Set total LOVE amount. */
+        // uint totalLove = getTotalLove(_clubid);
 
 
         /* Validate payout amount. */
-        require(club.pot >= (club.paid - payoutAmt),
-            "Oops! You CANNOT payout more than the pot size.");
+        // require(club.pot >= (club.paid - payoutAmt),
+        //     "Oops! You CANNOT payout more than the pot size.");
 
         /* Update paid amount. */
         // NOTE: Calculate before "action" is taken (prevent re-entry exploitation).
-        club.paid = club.paid - payoutAmt;
+        // club.paid = club.paid - payoutAmt;
 
         /* Transfer payout amount from contract to player. */
         require(_usdcToken.transfer(receiver, payoutAmt),
@@ -207,7 +208,7 @@ address receiver = 0x0;
             _namespace, ".total.", assetid, ".chips.for.", receiver
         ));
 
-        /* Retrieve value from Mini Apps Party database. */
+        /* Retrieve value from eternal database. */
         uint totalChips = _miniAppsPartyDb.getUint(hash);
 
         /* Update new total chips. */
@@ -224,28 +225,26 @@ address receiver = 0x0;
      * NOTE: Randomization occurs by utilzing the block hashes of the *NEXT*
      *       blocks produced by the miners.
      *
-     * @param _appid A unique identifier for the Mini App. (default is hostname)
+     * @param _clubid A unique identifier for the Mini App. (default is hostname)
      * @param _love Amount of USDC required to enter the table.
      * @param _msg A message to be displayed in the app's Fanclub. (max: 100 characters)
      */
     function shoutout(
-        uint _appid,
+        bytes32 _clubid,
         uint _love,
-        string _msg
+        string calldata _msg
     ) external returns (bool) {
         /* Validate LOVE amount. */
         require(_love >= MIN_BOOST_AMOUNT,
             "Oops! Amount of USDC is UNDER the minimum of 1.00.");
 
-        /* Initialize fan club. */
-        FanClub storage club;// = _clubs[_appid];
-
-// TODO Re-build properties w/ getters.
+        /* Set (fan club) owner. */
+        address owner = getOwner(_clubid);
 
         /* Validate table host. */
-        if (club.owner == address(0x0)) {
+        if (owner == address(0x0)) {
             /* Delegate call to predecessor. */
-            return MiniAppsPartyFans(_predecessor).shoutout(_appid, _love, _msg);
+            return MiniAppsPartyFans(_predecessor).shoutout(_clubid, _love, _msg);
         }
 
         /* Transfer buy-in amount from player to table/contract. */
@@ -268,10 +267,12 @@ address receiver = 0x0;
         );
 
         /* Add to players. */
-        _fans[_appid][msg.sender] = fan;
+        // _fans[_clubid][msg.sender] = fan;
 
         /* Broadcast (fan) shoutout. */
-        emit Shoutout(_appid, fan, _love, _msg);
+        emit Shoutout(_clubid, fan, _love, _msg);
+
+        return true;
     }
 
     /**
@@ -308,18 +309,16 @@ address receiver = 0x0;
      * Anyone can remove their LOVE (aka USDC) from any fan pool, at any time.
      */
     function withdraw(
-        uint _appid,
+        bytes32 _clubid,
         uint _love
     ) external returns (bool) {
-        /* Initialize table. */
-        FanClub storage club;// = _miniapps[_appid];
+        /* Set (fan club) owner. */
+        address owner = getOwner(_clubid);
 
-// TODO Re-build properties w/ getters.
-
-        /* Validate table host. */
-        if (club.owner == address(0x0)) {
+        /* Validate club owner. */
+        if (owner == address(0x0)) {
             /* Delegate call to predecessor. */
-            return MiniAppsPartyFans(_predecessor).withdraw(_appid, _love);
+            return MiniAppsPartyFans(_predecessor).withdraw(_clubid, _love);
         }
 
         return true;
@@ -332,24 +331,23 @@ address receiver = 0x0;
      */
 
     /**
-     * Get (USDC) Balance
+     * Get (Fan) Club
      *
-     * Retrieve the total amount of USDC a fan has deposited into the pool
-     * for a specific mini app.
+     * Retrieve the complete details for a specific fan club.
      */
-    function getBalance(
-        bytes32 _appid,
-        address _fan
-    ) external view returns (uint) {
-        /* Set hash. */
-        bytes32 hash = keccak256(abi.encodePacked(
-            _namespace, ".total.", _appid, ".love.for.", _fan
-        ));
+    function getClub(
+        bytes32 _clubid
+    ) external view returns (FanClub memory) {
+        /* Initialize fan club. */
+        FanClub memory club;
 
-        /* Retrieve value from Mini Apps Party database. */
-        uint totalLove = _miniAppsPartyDb.getUint(hash);
+        /* Set fan club owner. */
+        club.owner = getOwner(_clubid);
 
-        return totalLove;
+// TODO Re-build ALL properties from (public) getters.
+
+        /* Return fan club. */
+        return club;
     }
 
     /**
@@ -358,18 +356,21 @@ address receiver = 0x0;
      * Return a fan.
      */
     function getFan(
-        bytes32 _appid,
+        bytes32 _clubid,
         address _fan
     ) external view returns (Fan memory) {
         /* Initialize fan. */
-        Fan storage fan = _fans[_tableid][_address];
+        Fan memory fan;// = _fans[_clubid][_fan];
+
+// TODO Re-build properties w/ getters.
 
         /* Validate fan address. */
         if (fan.id == address(0x0)) {
             /* Delegate call to predecessor. */
-            return MiniAppsPartyFans(_predecessor).getPlayer(_fan, _appid);
+            return MiniAppsPartyFans(_predecessor).getFan(_clubid, _fan);
         }
 
+        /* Return fan. */
         return fan;
     }
 
@@ -379,66 +380,96 @@ address receiver = 0x0;
      * Return the addresses of all fans w/ active shoutouts.
      */
     function getFans(
-        uint _appid
+        bytes32 _clubid
     ) external view returns (address[] memory) {
         /* Initialize mini app. */
-        MiniApp storage miniapp = _miniapps[_appid];
+        FanClub memory club;// = _clubs[_clubid];
+
+// TODO Re-build properties w/ getters.
 
         /* Validate mini app owner. */
-        if (miniapp.owner == address(0x0)) {
+        if (club.owner == address(0x0)) {
             /* Delegate call to predecessor. */
-            return MiniAppsPartyFans(_predecessor).getFans(_appid);
+            return MiniAppsPartyFans(_predecessor).getFans(_clubid);
         }
 
-        return miniapp.fans;
+        return club.fans;
     }
 
     /**
-     * Get Fan Club
+     * Get Love
      *
-     * Return a fan club.
+     * Retrieve the total amount of USDC a fan has deposited into the pool
+     * for a specific fan club.
      */
-    function getFanClub(
-        uint _appid
-    ) external view returns (FanClub memory) {
-        /* Initialize mini app. */
-        FanClub storage club = _clubs[_appid];
-
+    function getLove(
+        bytes32 _clubid,
+        address _fan
+    ) public view returns (uint) {
         /* Set hash. */
         bytes32 hash = keccak256(abi.encodePacked(
-            _namespace, ".owner.of.", _appid
+            _namespace, ".total.", _clubid, ".love.for.", _fan
         ));
 
-        /* Retrieve value from Mini Apps Party database. */
-        club.owner = _miniAppsPartyDb.getAddress(hash);
+        /* Retrieve value from eternal database. */
+        uint totalLove = _miniAppsPartyDb.getUint(hash);
 
-        /* Update new total chips. */
-        _miniAppsPartyDb.setUint(hash, totalChips + _amount);
-
-        /* Validate mini app owner. */
-        if (miniapp.owner == address(0x0)) {
-            /* Delegate call to predecessor. */
-            return MiniAppsPartyFans(_predecessor).getMiniApp(_appid);
-        }
-
-        return miniapp;
+        return totalLove;
     }
 
     /**
-     * Get Total Fanclubs
+     * Get (Fan Club) Owner
      *
-     * Total number of tables created by hosts.
+     * Return the address for the owner of a fan club.
      */
-    function getTotalTables() external view returns (uint) {
+    function getOwner(
+        bytes32 _clubid
+    ) public view returns (address) {
         /* Set hash. */
         bytes32 hash = keccak256(abi.encodePacked(
-            _namespace, ".total.tables"
+            _namespace, ".owner.of.", _clubid
         ));
 
-        /* Retrieve value from Mini Apps Party database. */
-        uint totalTables = _miniAppsPartyDb.getUint(hash);
+        /* Return value from eternal database. */
+        return _miniAppsPartyDb.getAddress(hash);
+    }
 
-        return totalTables;
+    /**
+     * Get Total Fan Clubs
+     *
+     * Return the total number of active fan clubs.
+     */
+    function getTotalClubs() external view returns (uint) {
+        /* Set hash. */
+        bytes32 hash = keccak256(abi.encodePacked(
+            _namespace, ".total.fan.clubs"
+        ));
+
+        /* Retrieve value from eternal database. */
+        uint totalClubs = _miniAppsPartyDb.getUint(hash);
+
+        /* Return total number of fan clubs. */
+        return totalClubs;
+    }
+
+    /**
+     * Get Total Love
+     *
+     * Return the total amount of LOVE available for a fan club.
+     */
+    function getTotalLove(
+        bytes32 _clubid
+    ) public view returns (uint) {
+        /* Set hash. */
+        bytes32 hash = keccak256(abi.encodePacked(
+            _namespace, ".total.love.for.", _clubid
+        ));
+
+        /* Retrieve value from eternal database. */
+        uint totalLove = _miniAppsPartyDb.getUint(hash);
+
+        /* Return total amount of LOVE in fan club. */
+        return totalLove;
     }
 
     /**
@@ -481,5 +512,26 @@ address receiver = 0x0;
 
         /* Return success. */
         return true;
+    }
+
+    /***************************************************************************
+     *
+     * UTILITIES
+     *
+     */
+
+    /**
+     * Generate Mini App ID
+     *
+     * Hashes the hostname of the mini app to generate a unique mini app ID.
+     */
+    function generateAppId(
+        string calldata _hostname
+    ) external pure returns (bytes32) {
+        /* Generate a unique mini app ID. */
+        bytes32 appid = keccak256(abi.encodePacked(_hostname));
+
+        /* Return mini app ID. */
+        return appid;
     }
 }
