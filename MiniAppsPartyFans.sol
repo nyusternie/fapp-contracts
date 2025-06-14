@@ -20,10 +20,10 @@ import { IMiniAppsPartyDb } from "./interfaces/IMiniAppsPartyDb.sol";
 
 contract MiniAppsPartyFans is Ownable {
     /* Initialize predecessor contract. */
-    address payable private _predecessor;
+    address private _predecessor;
 
     /* Initialize successor contract. */
-    address payable private _successor;
+    address private _successor;
 
     /* Initialize revision number. */
     uint private _revision;
@@ -49,6 +49,9 @@ contract MiniAppsPartyFans is Ownable {
 
     /* Maximum number of fans to use for billing. */
     uint8 MAX_FANS_FOR_PAYOUTS = 15;
+
+    /* Percentage of LOVE paid-out each day from a fan's remaining balance. */
+    uint8 DAILY_PAYOUT_PCT = 15;
 
     /* Initialize BDFL (aka shomari.eth warplet) address. */
     address bdflAddr = 0x84D677548B9BE8dE8096F10Ff7d6C3e6187d7196;
@@ -118,7 +121,7 @@ contract MiniAppsPartyFans is Ownable {
         bytes32 hash = keccak256(abi.encodePacked("aname.", _namespace));
 
         /* Set predecessor address. */
-        _predecessor = payable(_miniAppsPartyDb.getAddress(hash));
+        _predecessor = _miniAppsPartyDb.getAddress(hash);
 
         /* Verify predecessor address. */
         if (_predecessor != address(0)) {
@@ -130,15 +133,19 @@ contract MiniAppsPartyFans is Ownable {
         }
     }
 
-    fallback() external payable {
+    // NOTE: `fallback` DOES NOT have a `payable` flag, in order to
+    //       PREVENT ETH from being sent into this contract.
+    fallback() external {
         /* Cancel this transaction. */
-        revert("Oops! Direct payments are NOT permitted here.");
+        revert("Oops! Ethereum (ETH) is NOT supported by this contract.");
     }
 
-    receive() external payable {
-        /* Cancel this transaction. */
-        revert("Oops! Direct payments are NOT permitted here.");
-    }
+    // NOTE: `receive` has been REMOVED, in order to
+    //       PREVENT ETH from being sent into this contract.
+    // receive() external payable {
+    //     /* Cancel this transaction. */
+    //     revert("Oops! Ethereum (ETH) is NOT supported by this contract.");
+    // }
 
     /**
      * @dev Only allow access to an authorized Mini Apps Party hosts.
@@ -195,19 +202,31 @@ contract MiniAppsPartyFans is Ownable {
         Shoutout[] memory shoutouts = sortByLove(_clubid);
 
         uint8 numFans;
-        uint payoutAmt = 0;
+        uint payoutTotal = 0;
         address receiver = address(0x0);
 
         /* Validate maximum payouts. */
         if (shoutouts.length > MAX_FANS_FOR_PAYOUTS) {
+            /* Set number of fans to MAX. */
             numFans = MAX_FANS_FOR_PAYOUTS;
         } else {
+            /* Set number of fans to FULL list length. */
             numFans = uint8(shoutouts.length);
         }
 
         /* Handle payout collection. */
+// FIXME How can we process ALL shoutouts?
+//       What is the maximum that can be processed in the loop?
+//       What is the gas cost?
         for (uint i = 0; i < numFans; i++) {
-            // payoutAmt
+            /* Set fan love. */
+            uint fanLove = shoutouts[i].love;
+
+            /* Calculate love tax. */
+            uint loveTax = (fanLove * DAILY_PAYOUT_PCT) / 100;
+
+            /* Add (fan) love tax to payout total. */
+            payoutTotal += loveTax;
         }
 
 
@@ -216,15 +235,15 @@ contract MiniAppsPartyFans is Ownable {
 
 
         /* Validate payout amount. */
-        // require(club.pot >= (club.paid - payoutAmt),
+        // require(club.pot >= (club.paid - payoutTotal),
         //     "Oops! You CANNOT payout more than the pot size.");
 
         /* Update paid amount. */
         // NOTE: Calculate before "action" is taken (prevent re-entry exploitation).
-        // club.paid = club.paid - payoutAmt;
+        // club.paid = club.paid - payoutTotal;
 
         /* Transfer payout amount from contract to player. */
-        require(_usdcToken.transfer(receiver, payoutAmt),
+        require(_usdcToken.transfer(receiver, payoutTotal),
             "Oops! USDC transfer has failed!");
 
         /* Initialize asset id. */
@@ -239,7 +258,7 @@ contract MiniAppsPartyFans is Ownable {
         uint totalChips = _miniAppsPartyDb.getUint(hash);
 
         /* Update new total chips. */
-        _miniAppsPartyDb.setUint(hash, totalChips + payoutAmt);
+        _miniAppsPartyDb.setUint(hash, totalChips + payoutTotal);
 
         return true;
     }
@@ -466,6 +485,25 @@ contract MiniAppsPartyFans is Ownable {
     }
 
     /**
+     * Get (Rewards) Payout Account
+     *
+     * Returns the preferred rewards payout account for a mini app owner.
+     */
+    function getPayoutAccount(
+        uint _fid
+    ) public view returns (address) {
+        /* Set hash. */
+        bytes32 hash = keccak256(abi.encodePacked(
+            _namespace, ".payout.account.for.", _fid
+        ));
+
+        /* Retrieve (rewards) account. */
+        address account = _miniAppsPartyDb.getAddress(hash);
+
+        /* Return (rewards) account. */
+        return account;
+    }
+    /**
      * Get Shoutout
      *
      * Retrieve the total amount of USDC a fan has deposited into the pool
@@ -553,12 +591,33 @@ contract MiniAppsPartyFans is Ownable {
      */
 
     /**
+     * Set (Rewards) Payout Account
+     *
+     * Save the preferred rewards payout account for the mini app owner.
+     */
+    function setPayoutAccount(
+        uint _fid,
+        address _account
+    ) external onlyAuthByPartyHosts returns (bool success) {
+        /* Set hash. */
+        bytes32 hash = keccak256(abi.encodePacked(
+            _namespace, ".payout.account.for.", _fid
+        ));
+
+        /* Update rewards account. */
+        _miniAppsPartyDb.setAddress(hash, _account);
+
+        /* Return success. */
+        return true;
+    }
+
+    /**
      * Set Successor
      *
-     * This is the contract address that replaced this current instnace.
+     * This is the contract address that replaced this current instanace.
      */
     function setSuccessor(
-        address payable _newSuccessor
+        address _newSuccessor
     ) external onlyAuthByPartyHosts returns (bool success) {
         /* Set successor contract. */
         _successor = _newSuccessor;
