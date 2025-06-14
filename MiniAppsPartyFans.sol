@@ -47,6 +47,9 @@ contract MiniAppsPartyFans is Ownable {
     // NOTE: Assumed to be USDC.
     uint MIN_BOOST_AMOUNT = 1_000_000; // $1.00
 
+    /* Maximum number of fans to use for billing. */
+    uint8 MAX_FANS_FOR_PAYOUTS = 15;
+
     /* Initialize BDFL (aka shomari.eth warplet) address. */
     address bdflAddr = 0x84D677548B9BE8dE8096F10Ff7d6C3e6187d7196;
 
@@ -56,45 +59,53 @@ contract MiniAppsPartyFans is Ownable {
 
     /* Initialize fans. */
     // clubid => (fan) address => Fan
-    // mapping(uint => mapping(address => Fan)) private _fans;
-    // clubid => (fan) address
-    mapping(uint => address) private _fans;
+    // mapping(bytes32 => mapping(address => Fan)) private _fans;
+    // clubid => (fan) addresses
+    mapping(bytes32 => Shoutout[]) private _shoutouts;
+
+    /* Initialize Fan schema. */
+    struct Fan {
+        address id;         // address of fan
+        uint totalLove;     // total LOVE balance of the fan
+        bytes32[] clubs;    // list of clubs this fan is showing LOVE for
+    }
 
     /* Initialize Fan Club schema. */
     struct FanClub {
-        bytes32 appid;      // a unique identifier for each mini app (default: hostname)
+        bytes32 appid;      // a unique identifier for each mini app (default: keccak<hostname>)
         address owner;      // mini app owner
         uint payout;        // total payouts sent to mini app owner
         uint8 revision;     // revision (location) for the (latest) mini app data
         address[] fans;     // list of fans supporting (w/ a shoutout) the mini app
     }
 
-    /* Initialize (fan) shoutout schema. */
-    struct Fan {
-        address id;
-        uint love;
-        string msg;
+    /* Initialize Fan Club schema. */
+    struct Shoutout {
+        address fanid;      // the address of the fan
+        uint love;          // amount of LOVE available for the shoutout
+        string message;     // a message posted to the fan club section of the mini app
     }
 
     /* Initialize (emit) events. */
     event FanClubCreated(
-        bytes32 indexed clubid
-        // FanClub club
-    );
-    event Payout(
         bytes32 indexed clubid,
-        uint amount
+        address creator
     );
-    event Shoutout(
+    event PayoutsDelivered(
         bytes32 indexed clubid,
-        Fan fan,
+        uint love
+    );
+    event ShoutoutPosted(
+        bytes32 indexed clubid,
+        address fan,
         uint love,
-        string msg
+        string shoutout
     );
-    event Withdraw(
+    event WithdrawalCompleted(
         bytes32 indexed clubid,
-        Fan fan,
-        uint amount
+        address fan,
+        uint love,
+        uint balance
     );
 
     /* Constructor */
@@ -181,8 +192,24 @@ contract MiniAppsPartyFans is Ownable {
             return MiniAppsPartyFans(_predecessor).payouts(_clubid, _maxFans);
         }
 
-uint payoutAmt = 0;
-address receiver = address(0x0);
+        Shoutout[] memory shoutouts = sortByLove(_clubid);
+
+        uint8 numFans;
+        uint payoutAmt = 0;
+        address receiver = address(0x0);
+
+        /* Validate maximum payouts. */
+        if (shoutouts.length > MAX_FANS_FOR_PAYOUTS) {
+            numFans = MAX_FANS_FOR_PAYOUTS;
+        } else {
+            numFans = uint8(shoutouts.length);
+        }
+
+        /* Handle payout collection. */
+        for (uint i = 0; i < numFans; i++) {
+            // payoutAmt
+        }
+
 
         /* Set total LOVE amount. */
         // uint totalLove = getTotalLove(_clubid);
@@ -227,12 +254,12 @@ address receiver = address(0x0);
      *
      * @param _clubid A unique identifier for the Mini App. (default is hostname)
      * @param _love Amount of USDC required to enter the table.
-     * @param _msg A message to be displayed in the app's Fanclub. (max: 100 characters)
+     * @param _message A message to be displayed in the app's Fanclub. (max: 100 characters)
      */
     function shoutout(
         bytes32 _clubid,
         uint _love,
-        string calldata _msg
+        string calldata _message
     ) external returns (bool) {
         /* Validate LOVE amount. */
         require(_love >= MIN_BOOST_AMOUNT,
@@ -244,7 +271,7 @@ address receiver = address(0x0);
         /* Validate table host. */
         if (owner == address(0x0)) {
             /* Delegate call to predecessor. */
-            return MiniAppsPartyFans(_predecessor).shoutout(_clubid, _love, _msg);
+            return MiniAppsPartyFans(_predecessor).shoutout(_clubid, _love, _message);
         }
 
         /* Transfer buy-in amount from player to table/contract. */
@@ -260,17 +287,22 @@ address receiver = address(0x0);
         // table.seated.push(msg.sender);
 
         /* Create player (object). */
-        Fan memory fan = Fan(
-            msg.sender,
-            _love,
-            _msg
-        );
+        // Fan memory fan = Fan(
+        //     msg.sender,
+        //     _love,
+        //     _message
+        // );
 
         /* Add to players. */
         // _fans[_clubid][msg.sender] = fan;
 
         /* Broadcast (fan) shoutout. */
-        emit Shoutout(_clubid, fan, _love, _msg);
+        emit ShoutoutPosted(
+            _clubid,
+            msg.sender,
+            _love,
+            _message
+        );
 
         return true;
     }
@@ -356,7 +388,6 @@ address receiver = address(0x0);
      * Return a fan.
      */
     function getFan(
-        bytes32 _clubid,
         address _fan
     ) external view returns (Fan memory) {
         /* Initialize fan. */
@@ -367,7 +398,7 @@ address receiver = address(0x0);
         /* Validate fan address. */
         if (fan.id == address(0x0)) {
             /* Delegate call to predecessor. */
-            return MiniAppsPartyFans(_predecessor).getFan(_clubid, _fan);
+            return MiniAppsPartyFans(_predecessor).getFan(_fan);
         }
 
         /* Return fan. */
@@ -432,6 +463,28 @@ address receiver = address(0x0);
 
         /* Return value from eternal database. */
         return _miniAppsPartyDb.getAddress(hash);
+    }
+
+    /**
+     * Get Shoutout
+     *
+     * Retrieve the total amount of USDC a fan has deposited into the pool
+     * for a specific fan club.
+     */
+    function getShoutout(
+        bytes32 _clubid,
+        address _fan
+    ) public view returns (string memory) {
+        /* Set hash. */
+        bytes32 hash = keccak256(abi.encodePacked(
+            _namespace, _clubid, ".shoutout.by.", _fan
+        ));
+
+        /* Retrieve value from eternal database. */
+        string memory message = _miniAppsPartyDb.getString(hash);
+
+        /* Return (shoutout) message. */
+        return message;
     }
 
     /**
@@ -533,5 +586,30 @@ address receiver = address(0x0);
 
         /* Return mini app ID. */
         return appid;
+    }
+
+    /**
+     * Sort (Fans) by Love
+     *
+     * Will sort all fans within a club, based on the amount of LOVE they offer.
+     */
+    function sortByLove(
+        bytes32 _clubid
+    ) public view returns(Shoutout[] memory) {
+        /* Retrieve all fans for club. */
+        Shoutout[] memory shoutouts = _shoutouts[_clubid];
+
+        /* Handle fan sorting. */
+        for (uint i = 1; i < shoutouts.length; i++) {
+            for (uint j = 0; j < i; j++) {
+                if (shoutouts[i].love < shoutouts[j].love) {
+                    Shoutout memory x = shoutouts[i];
+                    shoutouts[i] = shoutouts[j];
+                    shoutouts[j] = x;
+                }
+            }
+        }
+
+        return shoutouts;
     }
 }
