@@ -5,14 +5,14 @@ pragma solidity ^0.8.9;
  * Copyright (c) 2025 shomari.eth
  * SPDX-License-Identifier: MIT
  *
- * MiniAppsPartyDb
+ * FappPartyDb
  *
  * An eternal database, providing a sustainable storage solution for use
  * throughout the upgrade lifecycle of managing contracts.
  *
- * Released 25.6.7
+ * Released 25.6.21
  *
- * https://miniapps.party
+ * https://fapp.party
  */
 
 import { Ownable } from "../interfaces/Ownable.sol";
@@ -20,7 +20,7 @@ import { Ownable } from "../interfaces/Ownable.sol";
 /*******************************************************************************
  * Mini Apps Party Db Contract
  */
-contract MiniAppsPartyDb is Ownable {
+contract FappPartyDb is Ownable {
     /* Initialize all storage types. */
     mapping(bytes32 => address)    private addressStorage;
     mapping(bytes32 => bool)       private boolStorage;

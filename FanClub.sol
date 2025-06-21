@@ -3,14 +3,20 @@
  * Copyright (c) 2025 shomari.eth
  * SPDX-License-Identifier: MIT
  *
- * Mini Apps Party Fans
+ * Fan Club: A Transparent and Decentralized Fan Engagement Platform
  *
- * A transparent method of tracking the community voting by qualified individuals.
+ * The FanClub smart contract is a pioneering implementation for ANY blockchain;
+ * designed to create a transparent and decentralized platform for managing and
+ * engaging with fan communities.
+ *
+ * This contract provides a robust and secure method for tracking community
+ * voting, ensuring that only qualified individuals participate in crucial
+ * decisions that shape the future of each respective fan club.
  *
  * Version 1 (alpha)
- * Released 25.6.13
+ * Released 25.6.21
  *
- * https://miniapps.party/fans
+ * https://fapp.party/fanclub
  */
 pragma solidity ^0.8.9;
 
