@@ -15,10 +15,10 @@ pragma solidity ^0.8.9;
  * https://fapp.party
  */
 
-import { Ownable } from "../interfaces/Ownable.sol";
+import { Ownable } from "./interfaces/Ownable.sol";
 
 /*******************************************************************************
- * Mini Apps Party Db Contract
+ * FappParty Db Contract
  */
 contract FappPartyDb is Ownable {
     /* Initialize all storage types. */
@@ -30,8 +30,8 @@ contract FappPartyDb is Ownable {
     mapping(bytes32 => uint256)    private uIntStorage;
 
     /**
-     * @dev Only allow access from the latest version of a Mini Apps Party
-     *      contract or authorized Mini Apps Party administrator(s).
+     * @dev Only allow access from the latest version of a FappParty
+     *      contract or authorized FappParty administrator(s).
      */
     modifier onlyAuthByPartyHosts() {
         /***********************************************************************
